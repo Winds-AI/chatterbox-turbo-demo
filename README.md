@@ -10,7 +10,14 @@ This project allows you to run Resemble AI's Chatterbox Turbo model locally on y
     python setup_env.py
     ```
 
-2.  **Download Models**:
+2.  **Test GPU Access**:
+    Verify that your GPU is accessible and PyTorch CUDA installation is working correctly.
+    ```batch
+    .\.venv_chatterbox\Scripts\python.exe test_cuda.py
+    ```
+    This will check CUDA availability, display GPU information, and test basic tensor operations.
+
+3.  **Download Models**:
     Run the download script to fetch the model weights to the local `./model_cache` folder.
 
     **Windows:**
