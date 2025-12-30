@@ -1,0 +1,9 @@
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+torch==2.5.1+cu121
+torchaudio==2.5.1+cu121
+chatterbox-tts
+librosa
+soundfile
+python-dotenv
