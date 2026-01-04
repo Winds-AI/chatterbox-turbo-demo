@@ -39,7 +39,6 @@ pip install -r frontend/requirements.txt
 
 ### 3. Run Both Services
 
-**Option A: Two Terminal Windows**
 
 Terminal 1 (Backend):
 ```bash
@@ -53,25 +52,6 @@ Terminal 2 (Frontend):
 cd frontend
 streamlit run app.py
 # Frontend runs on http://localhost:8501
-```
-
-**Option B: PowerShell (Windows)**
-```powershell
-# Run backend in background
-Start-Process -FilePath "python" -ArgumentList "backend\main.py" -NoNewWindow
-
-# Run frontend in foreground
-streamlit run frontend\app.py
-```
-
-**Option C: Bash (Linux/Mac)**
-```bash
-# Run backend in background
-cd backend && python main.py &
-cd ..
-
-# Run frontend
-streamlit run frontend/app.py
 ```
 
 ### 4. Use the App
