@@ -1,0 +1,47 @@
+[project]
+name = "chatterbox-turbo"
+version = "1.0.0"
+description = "Realistic AI text-to-speech with voice cloning"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.5.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "streamlit>=1.35.0",
+    "torch>=2.1.0",
+    "torchaudio>=2.1.0",
+    "huggingface-hub>=0.24.0",
+    "chatterbox-tts>=0.5.0",
+]
+
+[tool.uv]
+package = false
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[scripts]
+# Development scripts
+dev = "uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+dev-reload = "uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload"
+frontend = "streamlit run frontend/app.py"
+check = "python -c \"import torch; print(f'CUDA: {torch.cuda.is_available()}')\""
+
+[tool.huggingface-hub]
+# Cache configuration for model downloads
+# Using local models/ directory (no symlinks for Windows compatibility)
+cache-dir = "models/hub"
+
+[env]
+# HuggingFace cache settings (Windows-compatible, no symlinks)
+HF_HOME = "models/hub"
+HF_HUB_DISABLE_SYMLINKS = "1"
+HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
+HF_HUB_ENABLE_HF_XET = "0"
+# Optional: Set token for faster downloads (remove comment to enable)
+# HF_TOKEN = "your_token_here"

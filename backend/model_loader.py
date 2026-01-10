@@ -1,7 +1,7 @@
 import os
 import logging
-from dotenv import load_dotenv
 from pathlib import Path
+from dotenv import load_dotenv
 
 logging.basicConfig(
     level=logging.INFO,
@@ -12,9 +12,15 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-os.environ["HF_HOME"] = os.path.abspath("../models")
+MODEL_REPO_ID = "ResembleAI/chatterbox-turbo"
+MODEL_CACHE_DIR = Path(__file__).parent.parent / "models" / "hub"
+
 os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
+os.environ["HF_HOME"] = str(MODEL_CACHE_DIR)
+
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 
 class EnvironmentError(Exception):
@@ -23,8 +29,8 @@ class EnvironmentError(Exception):
 
 import torch
 import torchaudio
+from chatterbox.tts_turbo import ChatterboxTurboTTS
 from huggingface_hub import snapshot_download
-from chatterbox.tts_turbo import ChatterboxTurboTTS, REPO_ID
 
 
 class ModelManager:
@@ -46,8 +52,7 @@ class ModelManager:
         try:
             import torch
             import torchaudio
-            import huggingface_hub
-            from chatterbox.tts_turbo import ChatterboxTurboTTS, REPO_ID
+            from chatterbox.tts_turbo import ChatterboxTurboTTS
 
             return True
         except ImportError as e:
@@ -77,6 +82,48 @@ class ModelManager:
         if error is not None:
             self._initialization_error = error
 
+    def _get_local_model_path(self):
+        model_path = MODEL_CACHE_DIR
+        if not model_path.exists():
+            return None
+
+        for item in model_path.iterdir():
+            if item.is_dir() and item.name.startswith("models--"):
+                snapshot_folder = item / "snapshots"
+                if snapshot_folder.exists():
+                    for snapshot in snapshot_folder.iterdir():
+                        if snapshot.is_dir():
+                            safetensors = snapshot / "t3_turbo_v1.safetensors"
+                            if safetensors.exists():
+                                return str(snapshot)
+        return None
+
+    def _download_model(self):
+        os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+        logger.info(f"Downloading Chatterbox Turbo model to: {MODEL_CACHE_DIR}")
+        logger.info("This may take 10-20 minutes (~2GB)...")
+
+        try:
+            local_path = snapshot_download(
+                repo_id=MODEL_REPO_ID,
+                token=HF_TOKEN if HF_TOKEN else None,
+                allow_patterns=[
+                    "*.safetensors",
+                    "*.json",
+                    "*.txt",
+                    "*.pt",
+                    "*.yaml",
+                    "*.model",
+                ],
+                local_dir=str(MODEL_CACHE_DIR),
+                local_dir_use_symlinks=False,
+            )
+            logger.info(f"Model downloaded to: {local_path}")
+            return local_path
+        except Exception as e:
+            logger.error(f"Failed to download model: {e}")
+            raise
+
     def load_model(self):
         self.check_environment()
 
@@ -93,54 +140,35 @@ class ModelManager:
                 raise RuntimeError(error_msg)
             device = "cuda"
             self._device = device
-            logger.info(f"Loading Chatterbox Turbo model on {device}...")
-            logger.info("This may take 10-20 minutes for the first download (~4GB)")
 
             try:
                 self._set_initialization_state(
-                    "initializing", stage="downloading_model", progress=0.2
+                    "initializing", stage="checking_cache", progress=0.2
                 )
-                # Path relative to project root (chatterbox directory)
-                cache_dir = os.path.join(
-                    os.path.dirname(os.path.dirname(__file__)), "models"
-                )
-                cache_dir = os.path.abspath(cache_dir)
-                logger.info(f"Model cache directory: {cache_dir}")
+                local_path = self._get_local_model_path()
 
-                local_path = snapshot_download(
-                    repo_id=REPO_ID,
-                    token=False,
-                    allow_patterns=[
-                        "*.safetensors",
-                        "*.json",
-                        "*.txt",
-                        "*.pt",
-                        "*.model",
-                    ],
-                    local_dir=cache_dir,
-                )
-                logger.info(f"Model files loaded from: {local_path}")
-
-                self._set_initialization_state(
-                    "initializing", stage="loading_model", progress=0.8
-                )
-                self._model = ChatterboxTurboTTS.from_local(local_path, device=device)
-                logger.info("Model loaded successfully!")
+                if local_path:
+                    logger.info(f"Loading model from local cache: {local_path}")
+                    self._set_initialization_state(
+                        "initializing", stage="loading_model", progress=0.8
+                    )
+                    self._model = ChatterboxTurboTTS.from_pretrained(local_path)
+                    logger.info("Model loaded successfully from cache!")
+                else:
+                    logger.info("Model not found in local cache, downloading...")
+                    local_path = self._download_model()
+                    self._set_initialization_state(
+                        "initializing", stage="loading_model", progress=0.8
+                    )
+                    self._model = ChatterboxTurboTTS.from_pretrained(local_path)
+                    logger.info("Model loaded successfully!")
 
                 self._set_initialization_state("ready", stage="complete", progress=1.0)
+
             except Exception as e:
-                if (
-                    "no such file or directory" in str(e).lower()
-                    or "cannot find" in str(e).lower()
-                ):
-                    error_msg = (
-                        f"Model files not found in models directory: {os.environ.get('HF_HOME', './models')}\n"
-                        f"Run backend once to download the model automatically."
-                    )
-                    self._set_initialization_state("error", error=error_msg)
-                    raise EnvironmentError(error_msg)
-                logger.error(f"Failed to load model: {e}")
-                self._set_initialization_state("error", error=str(e))
+                error_msg = f"Failed to load model: {str(e)}"
+                logger.error(error_msg)
+                self._set_initialization_state("error", error=error_msg)
                 raise
 
         return self._model
@@ -185,7 +213,7 @@ class ModelManager:
             logger.info(f"Step 2/4: Resampling completed in {step2_time:.2f}s")
 
             logger.info(
-                f"GPU memory before Step 3: {torch.cuda.memory_allocated(1e6):.2f} MB"
+                f"GPU memory before Step 3: {torch.cuda.memory_allocated() / (1024**2):.2f} MB"
             )
 
             step3_start = time.time()
@@ -199,14 +227,14 @@ class ModelManager:
 
             substep2_start = time.time()
             logger.info("Step 3.2: Extracting audio features/embeddings...")
-            with torch.amp.autocast("cuda"):
+            with torch.cuda.amp.autocast():
                 model.prepare_conditionals(voice_path, exaggeration=exaggeration)
             substep2_time = time.time() - substep2_start
             logger.info(
                 f"Step 3.2: Feature extraction completed in {substep2_time:.2f}s"
             )
             logger.info(
-                f"GPU memory after Step 3: {torch.cuda.memory_allocated(1e6):.2f} MB"
+                f"GPU memory after Step 3: {torch.cuda.memory_allocated() / (1024**2):.2f} MB"
             )
 
             step3_time = time.time() - step3_start
@@ -262,7 +290,7 @@ class ModelManager:
         )
 
         if self._device == "cuda":
-            with torch.amp.autocast("cuda"):
+            with torch.cuda.amp.autocast():
                 wav = model.generate(text)
         else:
             wav = model.generate(text)

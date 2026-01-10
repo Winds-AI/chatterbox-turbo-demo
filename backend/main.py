@@ -7,18 +7,11 @@ import torch
 import torchaudio
 import io
 import time
-import logging
+import os
 from pathlib import Path
 import tempfile
-import os
+from logging_config import logger, get_gpu_stats, log_request_end
 from model_loader import model_manager, EnvironmentError
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()],
-)
-logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -29,7 +22,16 @@ async def lifespan(app: FastAPI):
 
     async def initialize_model_async():
         try:
+            logger.info("Loading model...")
             model_manager.load_model()
+            gpu_stats = get_gpu_stats()
+            if gpu_stats:
+                logger.info(
+                    f"Model loaded. GPU Memory: {gpu_stats['memory_used_mb']:.0f}MB "
+                    f"({gpu_stats['memory_percent']:.0f}%), Utilization: {gpu_stats['utilization_percent']}%"
+                )
+            else:
+                logger.info("Model loaded (CPU mode)")
             logger.info("Server startup complete")
         except EnvironmentError as e:
             logger.warning(f"[Startup] Warning: {e}")
@@ -90,6 +92,8 @@ async def health():
         else:
             status = "starting"
 
+        gpu_stats = get_gpu_stats()
+
         return {
             "status": status,
             "model_loaded": model_manager._model is not None,
@@ -99,6 +103,7 @@ async def health():
             "initialization_stage": model_manager.get_initialization_stage(),
             "initialization_progress": model_manager.get_initialization_progress(),
             "initialization_error": model_manager.get_initialization_error(),
+            "gpu_stats": gpu_stats,
         }
     except EnvironmentError:
         return {
@@ -110,13 +115,26 @@ async def health():
 
 @app.post("/load_voice")
 async def load_voice(request: LoadVoiceRequest):
-    logger.info(f"Received load_voice request for path: {request.voice_path}")
+    start_time = time.time()
+    logger.info(
+        f"[Voice Load] Request: path={request.voice_path}, exaggeration={request.exaggeration}"
+    )
+
     try:
         model_manager.load_voice(request.voice_path, request.exaggeration)
-        logger.info("Voice loaded successfully via API")
-        return {"status": "success", "message": "Voice loaded successfully"}
+
+        elapsed = time.time() - start_time
+        gpu_stats = get_gpu_stats()
+        log_request_end(logger, "Voice Load", elapsed, gpu_stats)
+
+        return {
+            "status": "success",
+            "message": "Voice loaded successfully",
+            "time_seconds": round(elapsed, 2),
+        }
     except EnvironmentError as e:
-        logger.error(f"Environment error loading voice: {e}")
+        elapsed = time.time() - start_time
+        logger.error(f"[Voice Load] FAILED in {elapsed:.2f}s: {e}")
         raise HTTPException(
             status_code=503,
             detail={
@@ -126,7 +144,8 @@ async def load_voice(request: LoadVoiceRequest):
             },
         )
     except FileNotFoundError as e:
-        logger.error(f"Voice file not found: {request.voice_path}")
+        elapsed = time.time() - start_time
+        logger.error(f"[Voice Load] FAILED in {elapsed:.2f}s: Voice file not found")
         raise HTTPException(
             status_code=400,
             detail={
@@ -136,7 +155,8 @@ async def load_voice(request: LoadVoiceRequest):
             },
         )
     except Exception as e:
-        logger.error(f"Error loading voice: {e}")
+        elapsed = time.time() - start_time
+        logger.error(f"[Voice Load] FAILED in {elapsed:.2f}s: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -144,24 +164,32 @@ async def load_voice(request: LoadVoiceRequest):
 async def load_voice_upload(
     voice_file: UploadFile = File(...), exaggeration: float = Form(0.5)
 ):
-    logger.info(f"Received voice upload request: {voice_file.filename}")
+    start_time = time.time()
+    logger.info(f"[Voice Upload] Request: file={voice_file.filename}")
+
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             content = await voice_file.read()
-            logger.info(f"Uploaded file size: {len(content) / (1024 * 1024):.2f} MB")
+            file_size_mb = len(content) / (1024 * 1024)
+            logger.info(f"[Voice Upload] File size: {file_size_mb:.2f} MB")
             tmp.write(content)
             tmp_path = tmp.name
-            logger.info(f"File saved to temp path: {tmp_path}")
 
         model_manager.load_voice(tmp_path, exaggeration)
-        logger.info("Voice uploaded and loaded successfully")
+
+        elapsed = time.time() - start_time
+        gpu_stats = get_gpu_stats()
+        log_request_end(logger, "Voice Upload", elapsed, gpu_stats)
+
         return {
             "status": "success",
             "message": "Voice uploaded and loaded successfully",
+            "time_seconds": round(elapsed, 2),
         }
     except EnvironmentError as e:
-        logger.error(f"Environment error during voice upload: {e}")
+        elapsed = time.time() - start_time
+        logger.error(f"[Voice Upload] FAILED in {elapsed:.2f}s: {e}")
         raise HTTPException(
             status_code=503,
             detail={
@@ -171,25 +199,26 @@ async def load_voice_upload(
             },
         )
     except Exception as e:
-        logger.error(f"Error during voice upload: {e}")
+        elapsed = time.time() - start_time
+        logger.error(f"[Voice Upload] FAILED in {elapsed:.2f}s: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if tmp_path and os.path.exists(tmp_path):
-            logger.info(f"Cleaning up temp file: {tmp_path}")
             try:
                 os.unlink(tmp_path)
-            except Exception as e:
-                logger.warning(f"Failed to delete temp file {tmp_path}: {e}")
+            except Exception:
+                pass
 
 
 @app.post("/generate")
 async def generate_speech(request: GenerateRequest):
-    logger.info(
-        f"Received generate request: {request.text[:50]}{'...' if len(request.text) > 50 else ''}"
-    )
+    start_time = time.time()
+
+    text_preview = request.text[:50] + "..." if len(request.text) > 50 else request.text
+    logger.info(f"[Generate] Request: {len(request.text)} chars, text='{text_preview}'")
 
     if model_manager._current_voice is None:
-        logger.error("No voice loaded - refusing generation request")
+        logger.error("[Generate] FAILED: No voice loaded")
         raise HTTPException(
             status_code=400,
             detail={
@@ -200,13 +229,8 @@ async def generate_speech(request: GenerateRequest):
         )
 
     try:
-        start_time = time.time()
         wav = model_manager.generate_speech(request.text)
         generation_time = time.time() - start_time
-
-        logger.info(
-            f"Generated audio shape: {wav.shape}, sample rate: {model_manager._model.sr}, time: {generation_time:.2f}s"
-        )
 
         audio_bytes = io.BytesIO()
         torchaudio.save(
@@ -215,18 +239,38 @@ async def generate_speech(request: GenerateRequest):
         audio_bytes.seek(0)
 
         output_size = len(audio_bytes.getvalue())
-        logger.info(f"Output audio size: {output_size / (1024 * 1024):.2f} MB")
+        gpu_stats = get_gpu_stats()
+
+        if gpu_stats:
+            logger.info(
+                f"[Generate] SUCCESS in {generation_time:.2f}s. "
+                f"Audio: {wav.shape}, {output_size / (1024 * 1024):.2f}MB, "
+                f"GPU: {gpu_stats['memory_used_mb']:.0f}MB ({gpu_stats['memory_percent']:.0f}%), "
+                f"Util: {gpu_stats['utilization_percent']}%"
+            )
+            gpu_mem_header = str(round(gpu_stats["memory_used_mb"], 2))
+            gpu_util_header = str(gpu_stats["utilization_percent"])
+        else:
+            logger.info(
+                f"[Generate] SUCCESS in {generation_time:.2f}s. "
+                f"Audio: {wav.shape}, {output_size / (1024 * 1024):.2f}MB (CPU mode)"
+            )
+            gpu_mem_header = "N/A"
+            gpu_util_header = "N/A"
 
         return StreamingResponse(
             audio_bytes,
             media_type="audio/wav",
             headers={
-                "X-Generation-Time": str(generation_time),
+                "X-Generation-Time": str(round(generation_time, 2)),
+                "X-GPU-Memory-MB": gpu_mem_header,
+                "X-GPU-Utilization": gpu_util_header,
                 "Content-Disposition": "attachment; filename=output.wav",
             },
         )
     except EnvironmentError as e:
-        logger.error(f"Environment error during generation: {e}")
+        elapsed = time.time() - start_time
+        logger.error(f"[Generate] FAILED in {elapsed:.2f}s: {e}")
         raise HTTPException(
             status_code=503,
             detail={
@@ -236,7 +280,8 @@ async def generate_speech(request: GenerateRequest):
             },
         )
     except Exception as e:
-        logger.error(f"Error during generation: {e}")
+        elapsed = time.time() - start_time
+        logger.error(f"[Generate] FAILED in {elapsed:.2f}s: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
