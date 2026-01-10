@@ -12,7 +12,6 @@ from pathlib import Path
 import tempfile
 import os
 from model_loader import model_manager, EnvironmentError
-from metrics import metrics_manager, track_request_duration, track_phase
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +30,6 @@ async def lifespan(app: FastAPI):
     async def initialize_model_async():
         try:
             model_manager.load_model()
-            metrics_manager.update_model_loaded(True)
             logger.info("Server startup complete")
         except EnvironmentError as e:
             logger.warning(f"[Startup] Warning: {e}")
@@ -45,7 +43,6 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down Chatterbox Turbo API server...")
-    metrics_manager.update_model_loaded(False)
     if not model_init_task.done():
         model_init_task.cancel()
         try:
@@ -81,7 +78,6 @@ async def root():
 
 @app.get("/health")
 async def health():
-    metrics_manager.update_gpu_metrics()
     try:
         init_state = model_manager.get_initialization_state()
 
@@ -108,17 +104,8 @@ async def health():
         return {
             "status": "error",
             "error": "environment_not_setup",
-            "message": "Required libraries not installed. Run: python setup_env.py",
+            "message": "Required libraries not installed. Run: pip install -r requirements.txt",
         }
-
-
-@app.get("/metrics")
-async def metrics():
-    metrics_manager.update_gpu_metrics()
-    return Response(
-        content=metrics_manager.get_metrics(),
-        media_type="text/plain; version=0.0.4; charset=utf-8",
-    )
 
 
 @app.post("/load_voice")
@@ -135,7 +122,7 @@ async def load_voice(request: LoadVoiceRequest):
             detail={
                 "error": "environment_not_setup",
                 "message": str(e),
-                "solution": "Run: python setup_env.py",
+                "solution": "Run: pip install -r requirements.txt",
             },
         )
     except FileNotFoundError as e:
@@ -180,7 +167,7 @@ async def load_voice_upload(
             detail={
                 "error": "environment_not_setup",
                 "message": str(e),
-                "solution": "Run: python setup_env.py",
+                "solution": "Run: pip install -r requirements.txt",
             },
         )
     except Exception as e:
@@ -196,14 +183,10 @@ async def load_voice_upload(
 
 
 @app.post("/generate")
-@track_request_duration(endpoint="/generate", operation="total")
 async def generate_speech(request: GenerateRequest):
     logger.info(
         f"Received generate request: {request.text[:50]}{'...' if len(request.text) > 50 else ''}"
     )
-
-    metrics_manager.record_text_length(len(request.text))
-    metrics_manager.update_gpu_metrics()
 
     if model_manager._current_voice is None:
         logger.error("No voice loaded - refusing generation request")
@@ -232,8 +215,6 @@ async def generate_speech(request: GenerateRequest):
         audio_bytes.seek(0)
 
         output_size = len(audio_bytes.getvalue())
-        metrics_manager.record_audio_output(output_size)
-        metrics_manager.update_gpu_metrics()
         logger.info(f"Output audio size: {output_size / (1024 * 1024):.2f} MB")
 
         return StreamingResponse(
@@ -251,7 +232,7 @@ async def generate_speech(request: GenerateRequest):
             detail={
                 "error": "environment_not_setup",
                 "message": str(e),
-                "solution": "Run: python setup_env.py",
+                "solution": "Run: pip install -r requirements.txt",
             },
         )
     except Exception as e:

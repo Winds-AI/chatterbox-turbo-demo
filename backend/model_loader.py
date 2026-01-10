@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-os.environ["HF_HOME"] = os.path.abspath("../model_cache")
+os.environ["HF_HOME"] = os.path.abspath("../models")
 os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
 os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
 
@@ -52,7 +52,7 @@ class ModelManager:
             return True
         except ImportError as e:
             raise EnvironmentError(
-                f"Required libraries not installed. Please run: python setup_env.py\n"
+                f"Required libraries not installed. Please run: pip install -r requirements.txt\n"
                 f"Missing: {str(e)}"
             )
 
@@ -102,7 +102,7 @@ class ModelManager:
                 )
                 # Path relative to project root (chatterbox directory)
                 cache_dir = os.path.join(
-                    os.path.dirname(os.path.dirname(__file__)), "model_cache", "hub"
+                    os.path.dirname(os.path.dirname(__file__)), "models"
                 )
                 cache_dir = os.path.abspath(cache_dir)
                 logger.info(f"Model cache directory: {cache_dir}")
@@ -134,8 +134,8 @@ class ModelManager:
                     or "cannot find" in str(e).lower()
                 ):
                     error_msg = (
-                        f"Model files not found in cache directory: {os.environ.get('HF_HOME', './model_cache')}\n"
-                        f"Please run: python setup_env.py to download models"
+                        f"Model files not found in models directory: {os.environ.get('HF_HOME', './models')}\n"
+                        f"Run backend once to download the model automatically."
                     )
                     self._set_initialization_state("error", error=error_msg)
                     raise EnvironmentError(error_msg)

@@ -50,7 +50,7 @@ env.bak/
 venv.bak/
 
 # Model cache and downloads
-model_cache/
+models/
 *.safetensors
 *.pt
 *.model
@@ -96,7 +96,7 @@ logs/
 .cache/
 
 # Jupyter Notebook
-.ipynb_checkpoints
+.ipynb_checkpoints/
 
 # Sphinx documentation
 docs/_build/

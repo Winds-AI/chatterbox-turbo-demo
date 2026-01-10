@@ -29,6 +29,8 @@ You get a time series that you can query: "show me average latency in the last 5
 - Counter: Only goes up (e.g., total requests processed)
 - Gauge: Goes up/down (e.g., current GPU memory usage)
 - Histogram: Distribution of values (e.g., latency buckets: <100ms, <500ms, <1s, etc.)
+- Summary: Similar to histogram but client-side quantiles (e.g., request latency percentiles)
+Reference: https://prometheus.io/docs/concepts/metric_types
 
 Example for latency metric:
 - p50 = 200ms: Half of requests complete in ≤200ms
@@ -38,3 +40,23 @@ Example for latency metric:
 3. Architecture
 Your App → /metrics endpoint → Prometheus Server → Grafana Dashboard
 (exposes data) (scrapes every 15s) (visualizes)
+
+4. Prometheus Client vs Server
+- Client: Library in your app that creates metrics and exposes /metrics endpoint
+- Server: Separate service that pulls (scrapes) metrics from your app every 15s
+- Why separate: Monitoring system shouldn't go down if your app fails
+
+5. Global Registry vs CollectorRegistry
+- Global Registry: Default registry that collects ALL metrics from your app automatically
+- CollectorRegistry: Custom registry you create for isolation and control
+- Why custom: Keeps your metrics separate, easier testing, prevents conflicts with other libraries
+
+Prometheus Best Practices: https://prometheus.io/docs/practices/{one_of_below}
+- naming
+- consoles
+- instrumentation
+- histograms
+- alerting
+- rules
+- pushing
+- remote_write

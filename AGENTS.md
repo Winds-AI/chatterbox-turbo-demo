@@ -1,5 +1,3 @@
-# AGENTS.md
-
 Guide for anyone supporting Meet on the Chatterbox Turbo mini-project.
 
 ## Project snapshot
@@ -31,3 +29,9 @@ Guide for anyone supporting Meet on the Chatterbox Turbo mini-project.
 - Keep explanations encouraging and curiosity-driven; Meet is here to learn, not just to receive a finished system.
 - When new knowledge appears (e.g., benchmarking results, Docker lessons, web links, Plan user is making), note it somewhere easy to find (`docs/` folder, issues, comments) so the next agent can build on it.
 
+
+## ChatterBox Reference Links:
+- https://github.com/resemble-ai/chatterbox
+- https://chatterboxtts.com/docs
+- https://www.resemble.ai/
+- https://codewiki.google/github.com/resemble-ai/chatterbox
